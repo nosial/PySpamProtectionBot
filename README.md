@@ -81,7 +81,8 @@ provides an `spb` command:
 pip install .
 ```
 
-`pip install -e . --group dev` installs the development tools as well; `make check` then runs the
+`pip install ".[fast]"` adds TgCrypto, which encrypts Telegram traffic much faster than kurigram's pure Python
+fallback and needs a C compiler to install; the Docker image includes it. `pip install -e . --group dev` installs the development tools as well; `make check` then runs the
 linter and type checks, and `make test` runs the test suite. Start the bot by pointing it at its configuration file
 and database:
 

@@ -11,12 +11,14 @@ FROM python:3.13-alpine AS builder
 
 WORKDIR /build
 
-RUN python -m venv /opt/spb
+# TgCrypto is compiled from source, so the build stage needs a C compiler. Only the venv is copied
+# to the final image, so the compiler does not end up there.
+RUN apk add --no-cache build-base && python -m venv /opt/spb
 
 COPY pyproject.toml LICENSE ./
 COPY src ./src
 
-RUN /opt/spb/bin/pip install --no-cache-dir .
+RUN /opt/spb/bin/pip install --no-cache-dir ".[fast]"
 
 FROM python:3.13-alpine
 

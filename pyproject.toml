@@ -17,6 +17,11 @@ dependencies = [
     "PyYAML>=6",
 ]
 
+[project.optional-dependencies]
+# TgCrypto speeds up the encryption of Telegram traffic, which kurigram otherwise does in pure Python.
+# It has no wheels for current Python versions, so installing it needs a C compiler.
+fast = ["tgcrypto>=1.2.5"]
+
 [project.scripts]
 spb = "spb.main:main"
 
