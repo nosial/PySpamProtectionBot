@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from spb.classes import update_dispatcher
 from spb.classes.handler import Handler
 from spb.classes.handler_registry import HandlerRegistry
 from spb.classes.update_dispatcher import UpdateDispatcher
@@ -169,6 +170,22 @@ async def test_a_failing_handler_does_not_stop_the_others(template: HandlerConte
     await dispatching.drain(10)
 
     assert counter.count == 2
+    assert dispatching.processed_updates == 2
+
+
+async def test_a_failure_to_track_an_album_does_not_stop_the_worker(
+    template: HandlerContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing(*args: object) -> None:
+        raise RuntimeError("deliberate failure")
+
+    monkeypatch.setattr(update_dispatcher, "media_group", failing)
+    dispatching = dispatcher(template, 1, 16, CountingHandler())
+
+    dispatching.submit(updates.private_message(1, "one"))
+    dispatching.submit(updates.private_message(2, "two"))
+
+    assert await dispatching.drain(10)
     assert dispatching.processed_updates == 2
 
 

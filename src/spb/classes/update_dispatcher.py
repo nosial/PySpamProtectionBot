@@ -161,9 +161,10 @@ class UpdateDispatcher:
 
     async def _process(self, update: Update) -> None:
         context = self._template.with_update(update)
-        _track_media_group(context)
 
         try:
+            _track_media_group(context)
+
             for observer in self._registry.observers_for(context):
                 await _run(observer, context, update)
 

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - `/info`, `/report`, `/settings`, `/evidence` and the other commands answer in groups where the bot is not an
    administrator: Telegram refuses ephemeral messages from such a bot, so the answer is a regular reply to the
    command instead, and the attachments of `/evidence` reply to it.
+ - A failure while tracking an album is logged with its update instead of stopping the worker task that processed
+   it.
 
 ## [2.1.0] - 2026-11-03
 
