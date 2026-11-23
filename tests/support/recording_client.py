@@ -23,16 +23,22 @@ class RecordingClient:
 
     A method answers what the test set with respond(), a paging method yielding it item by item;
     otherwise methods that send or forward answer with a message numbered in calling order, so a
-    caller can reply to what it sent, and every other method answers True.
+    caller can reply to what it sent, and every other method answers True. A call the test set to
+    fail with fail() is recorded and raises instead.
     """
 
     def __init__(self) -> None:
         self.calls: list[Call] = []
         self._answers: dict[str, object] = {}
+        self._failures: dict[str, list[Exception]] = {}
 
     def respond(self, method: str, answer: object) -> None:
         """Makes a method answer the given value from now on."""
         self._answers[method] = answer
+
+    def fail(self, method: str, error: Exception) -> None:
+        """Makes the next call of a method raise the given error, once."""
+        self._failures.setdefault(method, []).append(error)
 
     def __getattr__(self, method: str) -> Callable[..., Any]:
         if method in _GENERATORS:
@@ -46,6 +52,8 @@ class RecordingClient:
 
         async def call(*args: Any, **kwargs: Any) -> Any:
             self.calls.append(Call(method, args, kwargs))
+            if self._failures.get(method):
+                raise self._failures[method].pop(0)
             if method in self._answers:
                 return self._answers[method]
             if method.startswith(("send_", "forward_")):

@@ -52,7 +52,12 @@ async def test_group_settings_sent_on_behalf_of_a_chat_get_a_regular_reply(
 async def test_group_settings_need_the_bot_to_change_info(
     context: HandlerContext, client: RecordingClient
 ) -> None:
-    client.respond("get_chat_members", [administrator(updates.TESTER)])
+    bot = ChatMember(
+        status=ChatMemberStatus.ADMINISTRATOR,
+        user=BOT,
+        privileges=ChatAdministratorRights(can_change_info=False),
+    )
+    client.respond("get_chat_members", [administrator(updates.TESTER), bot])
 
     await SettingsHandler().handle(context.with_update(updates.group_message(1, "/settings")))
 
@@ -61,6 +66,20 @@ async def test_group_settings_need_the_bot_to_change_info(
     assert sent.kwargs["text"] == context.languages.get(lang, "settings", "bot_admin_required")
     assert sent.kwargs["reply_parameters"].message_id == 1
     assert sent.kwargs["ephemeral_message_parameters"].receiver_user_id == updates.TESTER.id
+
+
+async def test_group_settings_answer_a_regular_reply_where_the_bot_is_no_administrator(
+    context: HandlerContext, client: RecordingClient
+) -> None:
+    client.respond("get_chat_members", [administrator(updates.TESTER)])
+
+    await SettingsHandler().handle(context.with_update(updates.group_message(1, "/settings")))
+
+    (sent,) = client.named("send_message")
+    lang = context.languages.default_language
+    assert sent.kwargs["text"] == context.languages.get(lang, "settings", "bot_admin_required")
+    assert sent.kwargs["reply_parameters"].message_id == 1
+    assert sent.kwargs["ephemeral_message_parameters"] is None
 
 
 async def test_group_settings_open_the_menu_for_the_caller_only(

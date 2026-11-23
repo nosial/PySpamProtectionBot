@@ -21,9 +21,10 @@ class EvidenceHandler(Handler):
     """Looks up an evidence record on the Federation server by UUID and displays it.
 
     When the caller is an authenticated operator, the request is made using that operator's token.
-    In group chats the response is ephemeral so only the caller sees it; in private chats a
-    regular message is sent. File attachments associated with the evidence are downloaded from
-    Federation and sent as individual documents replying to the evidence info message.
+    In group chats the response is ephemeral so only the caller sees it, unless the bot cannot send
+    ephemeral messages there; in private chats a regular message is sent. File attachments
+    associated with the evidence are downloaded from Federation and sent as individual documents,
+    replying to the evidence info message when it is a regular one.
     """
 
     async def handle(self, context: HandlerContext) -> None:
@@ -68,27 +69,28 @@ class EvidenceHandler(Handler):
         markup = FederationWebLinks.attach(
             None, context.web_links.button(lm, lang, Record.EVIDENCE, evidence.uuid)
         )
-        in_group = message_helper.is_group(message.chat)
-        info = await self.execute(
-            "evidence-ephemeral" if in_group else "evidence-reply",
-            context.telegram_client.send_message,
-            chat_id=message.chat.id,
-            text=html,
-            parse_mode=ParseMode.HTML,
-            reply_parameters=ReplyParameters(message_id=message.id),
-            message_thread_id=message_helper.topic_id(message),
-            ephemeral_message_parameters=message_helper.ephemeral_to(
-                message.from_user.id if in_group else None
-            ),
-            reply_markup=markup,
-        )
+        if message_helper.is_group(message.chat):
+            info = await self.send_with_ephemeral_fallback(
+                context,
+                message,
+                chat_id=message.chat.id,
+                text=html,
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=message.id),
+                message_thread_id=message_helper.topic_id(message),
+                ephemeral_message_parameters=message_helper.ephemeral_to(message.from_user.id),
+                reply_markup=markup,
+            )
+        else:
+            info = await self.reply_html(context, "evidence-reply", message, html, markup)
 
-        # The info message is ephemeral in groups, so attachments cannot reply to it there.
+        # An ephemeral message cannot be replied to, so the attachments reply to the info message
+        # only when it is a regular one.
         await evidence_renderer.send_attachments(
             context.telegram_client,
             context.federation,
             access_token,
             evidence,
             message.chat.id,
-            None if in_group else info.id,
+            info.id if info.ephemeral_message_id is None else None,
         )

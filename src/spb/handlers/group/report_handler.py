@@ -238,7 +238,7 @@ class ReportHandler(Handler):
 
         args = message_helper.parse_arguments(message.text)
         if not args:
-            await self._start_dialog(context, message, target)
+            await self._start_dialog(context, message, target, True)
             return
 
         # The first argument names the incident type when it is one; otherwise the whole argument
@@ -325,9 +325,18 @@ class ReportHandler(Handler):
         await send_private_prompt(context, session, lang, None)
 
     async def _start_dialog(
-        self, context: HandlerContext, message: Message, target: Message
+        self, context: HandlerContext, message: Message, target: Message, ephemeral: bool
     ) -> None:
-        """Opens the two-step report dialog as an ephemeral prompt only the reporter sees."""
+        """Opens the two-step report dialog, as an ephemeral prompt only the reporter sees when
+        asked for and the bot can send ephemeral messages in the chat, and as a regular prompt
+        otherwise."""
+        if (
+            ephemeral
+            and message_helper.is_group(message.chat)
+            and not await self.can_send_ephemeral(context, message.chat.id)
+        ):
+            ephemeral = False
+
         lm = context.languages
         lang = self.resolve_language(context, message)
         reporter_is_admin = self.is_chat_administrator(
@@ -339,21 +348,33 @@ class ReportHandler(Handler):
             message_helper.topic_id(target),
             report_attachments.for_report(context, target),
             reporter_is_admin,
-            True,
+            ephemeral,
         )
 
-        sent = await context.telegram_client.send_message(
-            message.chat.id,
-            lm.get(lang, "report", "incident_prompt"),
-            parse_mode=ParseMode.DISABLED,
-            message_thread_id=session.message_thread_id,
-            ephemeral_message_parameters=message_helper.ephemeral_to(message.from_user.id),
-            reply_markup=await _build_incident_type_markup(context, lang, session),
-        )
-        if sent.ephemeral_message_id is not None:
-            context.sessions.report.update_prompt_message_id(
-                session.hash, sent.ephemeral_message_id
+        try:
+            sent = await context.telegram_client.send_message(
+                message.chat.id,
+                lm.get(lang, "report", "incident_prompt"),
+                parse_mode=ParseMode.DISABLED,
+                message_thread_id=session.message_thread_id,
+                ephemeral_message_parameters=message_helper.ephemeral_to(
+                    message.from_user.id if ephemeral else None
+                ),
+                reply_markup=await _build_incident_type_markup(context, lang, session),
             )
+        except RPCError as e:
+            if not ephemeral or not self.is_bot_not_admin(e):
+                raise
+
+            # The cached administrator list was stale: start over with a regular prompt.
+            context.sessions.report.invalidate(session.hash)
+            context.chat_admins.remove(message.chat.id)
+            await self._start_dialog(context, message, target, False)
+            return
+
+        prompt_message_id = sent.ephemeral_message_id if ephemeral else sent.id
+        if prompt_message_id is not None:
+            context.sessions.report.update_prompt_message_id(session.hash, prompt_message_id)
         await self.delete_command_message(context, message)
 
     async def _submit_direct_report(

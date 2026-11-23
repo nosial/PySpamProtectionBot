@@ -2,8 +2,9 @@ import pytest
 from pyrogram.types import InlineKeyboardMarkup
 
 from spb.handlers.help_handler import HelpHandler
+from spb.objects.admin_info import AdminInfo
 from spb.objects.context.handler_context import HandlerContext
-from tests.support import updates
+from tests.support import contexts, updates
 from tests.support.recording_client import RecordingClient
 
 pytestmark = pytest.mark.anyio
@@ -16,6 +17,10 @@ def callbacks(markup: InlineKeyboardMarkup) -> list[str]:
 async def test_help_in_a_group_is_shown_only_to_the_caller(
     context: HandlerContext, client: RecordingClient
 ) -> None:
+    # The bot administers the group, so it can send ephemeral messages there.
+    context.chat_admins.put(
+        -1001234567890, [AdminInfo(contexts.BOT.id, False, False, False, False)]
+    )
     await HelpHandler().handle(context.with_update(updates.group_message(1, "/help")))
 
     (sent,) = client.named("send_message")

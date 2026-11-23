@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - The Docker image installs TgCrypto, so Telegram traffic is no longer encrypted in pure Python. Other installs
    can add it with the `fast` extra (`pip install ".[fast]"`), which needs a C compiler.
 
+### Fixed
+ - `/info`, `/report`, `/settings`, `/evidence` and the other commands answer in groups where the bot is not an
+   administrator: Telegram refuses ephemeral messages from such a bot, so the answer is a regular reply to the
+   command instead, and the attachments of `/evidence` reply to it.
+
 ## [2.1.0] - 2026-11-03
 
 This release follows version `2.2` of the OFD Specification and the ongoing SpamProtectionBot 1.0.14 with PyFederation

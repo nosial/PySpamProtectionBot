@@ -54,7 +54,9 @@ async def _handle_group_settings(context: HandlerContext, message: Message) -> N
 
     if not Handler.is_bot_change_information_administrator(context, message.chat.id):
         lang = Handler.resolve_language(context, message)
-        await context.telegram_client.send_message(
+        await Handler.send_with_ephemeral_fallback(
+            context,
+            message,
             chat_id=message.chat.id,
             text=context.languages.get(lang, "settings", "bot_admin_required"),
             parse_mode=ParseMode.HTML,

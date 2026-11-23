@@ -1,9 +1,10 @@
 import pytest
-from pyrogram.types import InlineKeyboardMarkup
+from pyrogram.enums import ChatMemberStatus
+from pyrogram.types import ChatAdministratorRights, ChatMember, InlineKeyboardMarkup, User
 
 from spb.handlers.language_handler import LanguageHandler
 from spb.objects.context.handler_context import HandlerContext
-from tests.support import updates
+from tests.support import contexts, updates
 from tests.support.recording_client import RecordingClient
 
 pytestmark = pytest.mark.anyio
@@ -71,7 +72,18 @@ async def test_a_language_no_longer_shipped_is_ignored(
 async def test_only_group_administrators_change_the_group_language(
     context: HandlerContext, client: RecordingClient
 ) -> None:
-    client.respond("get_chat_members", [])
+    # Only the bot administers the group, so it can answer the caller ephemerally.
+    bot = User(id=contexts.BOT.id, is_bot=True, first_name="Test Bot")
+    client.respond(
+        "get_chat_members",
+        [
+            ChatMember(
+                status=ChatMemberStatus.ADMINISTRATOR,
+                user=bot,
+                privileges=ChatAdministratorRights(),
+            )
+        ],
+    )
 
     await LanguageHandler().handle(context.with_update(updates.group_message(1, "/language")))
 

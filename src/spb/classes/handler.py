@@ -4,6 +4,7 @@ import contextlib
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from pyrogram.enums import ChatMembersFilter, ChatMemberStatus, ChatType, ParseMode
 from pyrogram.errors import RPCError
@@ -226,13 +227,16 @@ class Handler(ABC):
         """Sends an HTML answer to the message's chat, in the same forum topic.
 
         In group chats the answer is ephemeral, so only the message's author can see it; in private
-        chats a regular message is sent unless an ephemeral one is asked for.
+        chats a regular message is sent unless an ephemeral one is asked for. Where the bot cannot
+        send ephemeral messages, the answer is a regular reply to the message instead.
         """
         ephemeral_parameters = None
         if (ephemeral or message_helper.is_group(message.chat)) and message.from_user is not None:
             ephemeral_parameters = message_helper.ephemeral_to(message.from_user.id)
 
-        await context.telegram_client.send_message(
+        await Handler.send_with_ephemeral_fallback(
+            context,
+            message,
             chat_id=message.chat.id,
             text=html,
             parse_mode=ParseMode.HTML,
@@ -242,12 +246,74 @@ class Handler(ABC):
         )
 
     @staticmethod
+    async def can_send_ephemeral(context: HandlerContext, chat_id: int) -> bool:
+        """Returns whether the bot can send ephemeral messages in a group chat.
+
+        Telegram only delivers ephemeral messages from a bot that is an administrator of the chat,
+        and answers anything else with BOT_NOT_ADMIN. The administrator list is loaded when it is
+        not cached; when it cannot be loaded, the bot is not taken for an administrator.
+        """
+        administrators = await context.chat_admins.get_async(
+            chat_id, lambda key: Handler.load_administrators(context, key), None
+        )
+        return administrators is not None and any(
+            admin.id == context.bot_user_id for admin in administrators
+        )
+
+    @staticmethod
+    async def send_with_ephemeral_fallback(
+        context: HandlerContext, command: Message, **request: Any
+    ) -> Message:
+        """Sends a message that may be ephemeral, falling back to a regular reply to the command
+        message when the bot cannot send ephemeral messages in the chat.
+
+        Args:
+            command: The message being answered, which the fallback replies to.
+            request: The arguments of send_message, changed in place when falling back.
+
+        Returns:
+            The sent message, an ephemeral one only when it was delivered ephemerally.
+        """
+        if (
+            request.get("ephemeral_message_parameters") is not None
+            and message_helper.is_group(command.chat)
+            and not await Handler.can_send_ephemeral(context, command.chat.id)
+        ):
+            _as_regular_reply(request, command)
+
+        try:
+            return await context.telegram_client.send_message(**request)
+        except RPCError as e:
+            if request.get("ephemeral_message_parameters") is None or not Handler.is_bot_not_admin(
+                e
+            ):
+                raise
+
+            log.debug(
+                "Ephemeral message rejected in chat %s (bot is not an administrator), sending a "
+                "regular reply",
+                command.chat.id,
+            )
+            context.chat_admins.remove(command.chat.id)
+            _as_regular_reply(request, command)
+            return await context.telegram_client.send_message(**request)
+
+    @staticmethod
+    def is_bot_not_admin(e: RPCError) -> bool:
+        """Returns whether Telegram rejected a request because the bot is not an administrator of
+        the chat (BOT_NOT_ADMIN)."""
+        return "BOT_NOT_ADMIN" in str(e)
+
+    @staticmethod
     async def send_ephemeral(context: HandlerContext, message: Message, text: str) -> None:
-        """Sends a plain-text ephemeral message only the message's author can see."""
+        """Sends a plain-text ephemeral message only the message's author can see, or a regular
+        reply to the message where the bot cannot send ephemeral messages."""
         if message.from_user is None:
             return
 
-        await context.telegram_client.send_message(
+        await Handler.send_with_ephemeral_fallback(
+            context,
+            message,
             chat_id=message.chat.id,
             text=text,
             parse_mode=ParseMode.DISABLED,
@@ -447,3 +513,11 @@ class Handler(ABC):
             message_id=message.id,
             reply_markup=FederationWebLinks.links_only(message.reply_markup),
         )
+
+
+def _as_regular_reply(request: dict[str, Any], command: Message) -> None:
+    """Turns the arguments of an ephemeral message into those of a regular reply to the command
+    message."""
+    request["ephemeral_message_parameters"] = None
+    if request.get("reply_parameters") is None:
+        request["reply_parameters"] = ReplyParameters(message_id=command.id)

@@ -6,12 +6,14 @@ import pytest
 import respx
 from pyrogram import Client
 from pyrogram.enums import ChatType
+from pyrogram.errors import BadRequest
 from pyrogram.types import CallbackQuery, Chat, Message, User
 from pyrogram.types.messages_and_media.message import Str
 
 from spb.classes.federation_service import FederationService
 from spb.enums import ReportPage
 from spb.handlers.group.report_handler import ReportHandler
+from spb.objects.admin_info import AdminInfo
 from spb.objects.context.handler_context import HandlerContext
 from spb.objects.update import Update
 from tests.support import contexts, payloads, updates
@@ -50,6 +52,8 @@ async def context(
     await federation.authenticate()
     context = contexts.template(tmp_path, federation, cast(Client, client))
     context.managers.chat_configurations.enable_chat_configuration(GROUP.id)
+    # The bot administers the group, so it can send ephemeral messages there.
+    context.chat_admins.put(GROUP.id, [AdminInfo(contexts.BOT.id, False, True, True, False)])
     yield context
     context.database.close()
 
@@ -108,6 +112,39 @@ async def test_a_report_opens_an_ephemeral_dialog_that_advances_on_a_type(
     assert advanced is not None
     assert advanced.page is ReportPage.COMMENT
     assert len(client.named("edit_ephemeral_message_text")) == 1
+
+
+async def test_a_report_opens_a_regular_dialog_where_the_bot_cannot_send_ephemeral_messages(
+    context: HandlerContext, client: RecordingClient
+) -> None:
+    context.chat_admins.put(GROUP.id, [])
+    client.respond("send_message", Message(id=70, date=updates.DATE, chat=GROUP))
+
+    await ReportHandler().handle(context.with_update(report_command()))
+
+    (prompt,) = client.named("send_message")
+    assert prompt.kwargs["ephemeral_message_parameters"] is None
+    session = context.sessions.report.find_by_prompt_message_id(GROUP.id, 70)
+    assert session is not None
+    assert not session.ephemeral
+
+
+async def test_a_report_prompt_refused_as_ephemeral_is_sent_again_as_a_regular_one(
+    context: HandlerContext, client: RecordingClient
+) -> None:
+    client.fail("send_message", BadRequest("[400 BOT_NOT_ADMIN]"))
+    client.respond("send_message", Message(id=70, date=updates.DATE, chat=GROUP))
+
+    await ReportHandler().handle(context.with_update(report_command()))
+
+    refused, prompt = client.named("send_message")
+    assert refused.kwargs["ephemeral_message_parameters"] is not None
+    assert prompt.kwargs["ephemeral_message_parameters"] is None
+    session = context.sessions.report.find_by_prompt_message_id(GROUP.id, 70)
+    assert session is not None
+    assert not session.ephemeral
+    assert context.chat_admins.get_if_present(GROUP.id) is None
+    assert len(client.named("delete_messages")) == 1
 
 
 async def test_a_report_of_ones_own_message_is_refused(
